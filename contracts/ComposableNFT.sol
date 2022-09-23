@@ -2,19 +2,40 @@
 pragma solidity >=0.4.22 <0.9.0;
 
 import "@openzeppelin/contracts/token/ERC721/extensions/ERC721Burnable.sol";
+import "@openzeppelin/contracts/token/ERC721/IERC721Receiver.sol";
 
 // @title Composable NFT that can contain child NFTs.
 // @author 0xEljh
 // @dev Support adding NFTs to this NFT.
-abstract contract ComposableNFT is ERC721Burnable {
+abstract contract ComposableNFT is ERC721Burnable, IERC721Receiver {
     struct ChildNFT {
         address contractAddress;
         uint256 tokenId;
     }
 
-    mapping(uint256 => ChildNFT[]) public _childNFTs;
+    mapping(uint256 => ChildNFT[]) public _childNFTs; // NFT ID => Child NFTs
+    mapping(address => ChildNFT[]) public _receivedNFTs; // original owner => Unassigned Child NFTs
+
+    event ChildNFTAdded(
+        address indexed contractAddress,
+        uint256 indexed tokenId,
+        uint256 indexed childTokenId
+    );
 
     constructor() {}
+
+    // @dev safeTransferFrom must be used to add NFTs to the contract.
+    // @dev NFTs added this way can then be assigned by the wallet
+    // @dev to desired composable NFT.
+    function onERC721Received(
+        address,
+        address from,
+        uint256 tokenId,
+        bytes calldata
+    ) external override returns (bytes4) {
+        _receivedNFTs[from].push(ChildNFT(msg.sender, tokenId));
+        return this.onERC721Received.selector;
+    }
 
     // @dev return child NFT to the owner of this NFT.
     // @dev this does not delete the array element.
@@ -24,7 +45,7 @@ abstract contract ComposableNFT is ERC721Burnable {
     {
         IERC721(childNFTs[childIndex].contractAddress).safeTransferFrom(
             address(this),
-            msg.sender,
+            _msgSender(), // TODO: verify if problematic
             childNFTs[childIndex].tokenId
         );
     }
@@ -42,15 +63,6 @@ abstract contract ComposableNFT is ERC721Burnable {
         // delete child NFT mapping
         delete _childNFTs[tokenId];
     }
-
-    // function decompose(uint256 tokenId) public virtual {
-    //     require(
-    //         _isApprovedOrOwner(_msgSender(), tokenId),
-    //         "ComposableNFT: caller is not token owner nor approved"
-    //     );
-    //     // burn this NFT; it also returns all child NFTs to the owner
-    //     _burn(tokenId);
-    // }
 
     // @dev Remove a specific child NFT from this NFT.
     // @param tokenId The ID of the NFT to remove.
@@ -80,24 +92,6 @@ abstract contract ComposableNFT is ERC721Burnable {
                 break;
             }
         }
-
-        // burn this NFT if it has no child NFTs
-        if (childNFTs.length == 0) {
-            _burn(tokenId);
-        }
-    }
-
-    function _recieveNFT(address contractAddress, uint256 tokenId) internal {
-        IERC721(contractAddress).safeTransferFrom(
-            msg.sender,
-            address(this),
-            tokenId
-        );
-        // verify NFT is now owned by contract
-        require(
-            IERC721(contractAddress).ownerOf(tokenId) == address(this),
-            "ComposableNFT: recieve NFT failed"
-        );
     }
 
     // @dev Add a child NFT to this NFT by transferring it to this contract.
@@ -113,28 +107,45 @@ abstract contract ComposableNFT is ERC721Burnable {
             _isApprovedOrOwner(_msgSender(), tokenId),
             "ComposableNFT: caller is not token owner nor approved"
         );
-        _recieveNFT(contractAddress, childTokenId);
-        _childNFTs[tokenId].push(ChildNFT(contractAddress, childTokenId));
+
+        require(_receivedNFTs[_msgSender()].length > 0, "No NFTs received");
+
+        for (uint256 i = 0; i < _receivedNFTs[_msgSender()].length; i++) {
+            if (
+                _receivedNFTs[_msgSender()][i].tokenId == childTokenId &&
+                _receivedNFTs[_msgSender()][i].contractAddress ==
+                contractAddress
+            ) {
+                // add childNFT to parent NFT.
+                _childNFTs[tokenId].push(
+                    ChildNFT(contractAddress, childTokenId)
+                );
+
+                // remove childNFT from received NFTs.
+                _receivedNFTs[_msgSender()][i] = _receivedNFTs[_msgSender()][
+                    _receivedNFTs[_msgSender()].length - 1
+                ];
+                _receivedNFTs[_msgSender()].pop();
+
+                emit ChildNFTAdded(contractAddress, tokenId, childTokenId);
+                break;
+            }
+        }
     }
 
-    // // @dev Compose child NFTs by minting a new NFT.
-    // // @param childNFTs The array of child NFTs to compose.
-    // // @param to The address to mint the new NFT to.
-    // // @param uri The URI of the new NFT.
-    // function compose(
-    //     ChildNFT[] memory childNFTs,
-    //     address to,
-    //     string memory uri
-    // ) public virtual {
-    //     // generate a new token ID
-    //     // TODO: use a better way to generate token ID
-    //     uint256 tokenId = uint256(keccak256(abi.encode(childNFTs)));
-    //     // mint the new NFT
-    //     _mint(to, tokenId);
+    function getSentNFTs(address owner)
+        external
+        view
+        returns (ChildNFT[] memory)
+    {
+        return _receivedNFTs[owner];
+    }
 
-    //     for (uint256 i = 0; i < childNFTs.length; i++) {
-    //         _recieveNFT(childNFTs[i].contractAddress, childNFTs[i].tokenId);
-    //         _childNFTs[tokenId].push(childNFTs[i]);
-    //     }
-    // }
+    function getChildNFTs(uint256 tokenId)
+        external
+        view
+        returns (ChildNFT[] memory)
+    {
+        return _childNFTs[tokenId];
+    }
 }
