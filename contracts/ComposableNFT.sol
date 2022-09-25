@@ -13,8 +13,8 @@ abstract contract ComposableNFT is ERC721Burnable, IERC721Receiver {
         uint256 tokenId;
     }
 
-    mapping(uint256 => ChildNFT[]) public _childNFTs; // NFT ID => Child NFTs
-    mapping(address => ChildNFT[]) public _receivedNFTs; // original owner => Unassigned Child NFTs
+    mapping(uint256 => ChildNFT[]) internal _childNFTs; // NFT ID => Child NFTs
+    mapping(address => ChildNFT[]) internal _receivedNFTs; // original owner => Unassigned Child NFTs
 
     event ChildNFTAdded(
         address indexed contractAddress,
@@ -133,7 +133,8 @@ abstract contract ComposableNFT is ERC721Burnable, IERC721Receiver {
         }
     }
 
-    function getSentNFTs(address owner)
+    // @dev get all NFTs received by this contract from the user.
+    function getReceivedNFTs(address owner)
         external
         view
         returns (ChildNFT[] memory)

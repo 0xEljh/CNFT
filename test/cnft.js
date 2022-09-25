@@ -41,7 +41,7 @@ contract("cnft", function (accounts) {
     });
     const contractBalance = await cnftInstance.balanceOf(cnftInstance.address);
     assert.equal(contractBalance, 1);
-    const sentNFTs = await cnftInstance.getSentNFTs(accounts[0]);
+    const sentNFTs = await cnftInstance.getReceivedNFTs(accounts[0]);
     assert(sentNFTs.length === 1);
     assert.equal(sentNFTs[0].tokenId, 2);
   });
